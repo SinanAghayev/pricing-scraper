@@ -1,4 +1,5 @@
 from typing import Annotated, Sequence, TypedDict
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 import pandas as pd
 import requests
@@ -43,8 +44,16 @@ def check_website_exists(url: str) -> bool:
 
         websites_tried.append(url)
         if r.status_code < 400:
+            original_domain = urlparse(url).netloc
+            final_domain = urlparse(r.url).netloc
+
+            if original_domain != final_domain:
+                print(f"Redirected to different domain: {final_domain}")
+                return False
+
             if url in websites_found:
                 print(f"Duplicate ignored: {url}")
+                return False
             else:
                 websites_found.append(url)
             return True
@@ -61,7 +70,7 @@ model = ChatOpenAI(model="gpt-4o-mini").bind_tools(tools)
 def agent(state: AgentState) -> AgentState:
     global iterations_done_count
     iterations_done_count += 1
-    print(iterations_done_count)
+    print(f"{iterations_done_count=}")
     system_prompt = SystemMessage(
         content=f"""
             You are Scraper, a research agent.
@@ -86,8 +95,8 @@ def agent(state: AgentState) -> AgentState:
     if hasattr(response, "tool_calls") and response.tool_calls:
         print(f" USING TOOLS: {[tc['name'] for tc in response.tool_calls]}")
 
-    print(f"{websites_found=}")
-    print(f"{websites_tried=}")
+    print(f"{len(websites_found)=}")
+    print(f"{len(websites_tried)=}")
     return {"messages": list(state["messages"]) + [response]}
 
 
@@ -126,7 +135,9 @@ def run_agent():
     print("\n ===== BEGIN =====")
 
     state = {"messages": []}
-    for step in app.stream(state, stream_mode="values"):
+    for step in app.stream(
+        state, stream_mode="values", config={"recursion_limit": config.MAX_ITERATIONS}
+    ):
         if "messages" in step:
             print_messages(step["messages"])
 
